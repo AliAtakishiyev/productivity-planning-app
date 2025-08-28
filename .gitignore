@@ -4,10 +4,23 @@
 *.log
 *.pyc
 *.swp
+.DS_Store
+.atom/
+.build/
 .buildlog/
 .history
+.svn/
+.swiftpm/
+migrate_working_dir/
 
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
 
+# VS Code (uncomment if you want to ignore your workspace settings)
+# .vscode/
 
 # Flutter repo-specific
 /bin/cache/
@@ -40,7 +53,9 @@ analysis_benchmark.json
 .packages
 .pub-preload-cache/
 .pub/
+.pub-cache/
 build/
+/build/
 flutter_*.png
 linked_*.ds
 unlinked.ds
@@ -56,6 +71,9 @@ unlinked_spec.ds
 **/android/**/GeneratedPluginRegistrant.java
 **/android/key.properties
 *.jks
+/android/app/debug
+/android/app/profile
+/android/app/release
 
 # iOS/XCode related
 **/ios/**/*.mode1v3
@@ -106,9 +124,13 @@ unlinked_spec.ds
 
 # Coverage
 coverage/
+/coverage/
 
 # Symbols
 app.*.symbols
+
+# Obfuscation related
+app.*.map.json
 
 # Exceptions to above rules.
 !**/ios/**/default.mode1v3
