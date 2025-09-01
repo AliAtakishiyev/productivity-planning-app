@@ -227,6 +227,8 @@ class DailyTask {
   final DateTime date;
   final bool isCompleted;
   final int estimatedMinutes;
+  final int actualMinutes;
+  final String notes;
 
   DailyTask({
     required this.id,
@@ -235,6 +237,8 @@ class DailyTask {
     required this.date,
     this.isCompleted = false,
     this.estimatedMinutes = 30,
+    this.actualMinutes = 0,
+    this.notes = '',
   });
 
   DailyTask copyWith({
@@ -244,6 +248,8 @@ class DailyTask {
     DateTime? date,
     bool? isCompleted,
     int? estimatedMinutes,
+    int? actualMinutes,
+    String? notes,
   }) {
     return DailyTask(
       id: id ?? this.id,
@@ -252,6 +258,8 @@ class DailyTask {
       date: date ?? this.date,
       isCompleted: isCompleted ?? this.isCompleted,
       estimatedMinutes: estimatedMinutes ?? this.estimatedMinutes,
+      actualMinutes: actualMinutes ?? this.actualMinutes,
+      notes: notes ?? this.notes,
     );
   }
 
@@ -263,6 +271,8 @@ class DailyTask {
       'date': date.toIso8601String(),
       'isCompleted': isCompleted,
       'estimatedMinutes': estimatedMinutes,
+      'actualMinutes': actualMinutes,
+      'notes': notes,
     };
   }
 
@@ -274,6 +284,8 @@ class DailyTask {
       date: DateTime.parse(json['date']),
       isCompleted: json['isCompleted'] ?? false,
       estimatedMinutes: json['estimatedMinutes'] ?? 30,
+      actualMinutes: json['actualMinutes'] ?? 0,
+      notes: json['notes'] ?? '',
     );
   }
 }

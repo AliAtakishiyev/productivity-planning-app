@@ -168,7 +168,7 @@ class PlanCard extends StatelessWidget {
                         ),
                         const SizedBox(width: 4),
                         Text(
-                          '${plan.currentStreak} day streak',
+                          '🔥 ${plan.currentStreak} day streak',
                           style: const TextStyle(
                             color: Colors.orange,
                             fontSize: 12,
@@ -179,13 +179,26 @@ class PlanCard extends StatelessWidget {
                     ),
                   ),
                   const Spacer(),
-                  Text(
-                    '${plan.monthlyPlans.where((mp) => mp.isCompleted).length}/${plan.monthlyPlans.length} months',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey[600],
-                      fontWeight: FontWeight.w500,
-                    ),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(
+                        '${plan.monthlyPlans.where((mp) => mp.isCompleted).length}/${plan.monthlyPlans.length} months',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey[600],
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Best: ${plan.bestStreak} days',
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: Colors.grey[500],
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),

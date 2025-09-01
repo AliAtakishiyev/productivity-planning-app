@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:productivity_planning_app/providers/plan_provider.dart';
 import 'package:productivity_planning_app/models/plan.dart';
+import 'package:productivity_planning_app/screens/task_detail_screen.dart';
+import 'package:productivity_planning_app/screens/plan_detail_screen.dart';
 import 'package:intl/intl.dart';
 
 class MonthlyPlanCard extends StatelessWidget {
@@ -112,41 +114,7 @@ class MonthlyPlanCard extends StatelessWidget {
                   weeklyPlan,
                 )),
                 
-                // Action Buttons
-                if (!monthlyPlan.isCompleted && isCurrentMonth)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 16),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            onPressed: () => _showWeeklyPlanDetails(context, monthlyPlan.weeklyPlans.first),
-                            icon: const Icon(Icons.visibility),
-                            label: const Text('View Details'),
-                            style: OutlinedButton.styleFrom(
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: ElevatedButton.icon(
-                            onPressed: () => _completeAllWeeklyPlans(context),
-                            icon: const Icon(Icons.check_circle),
-                            label: const Text('Complete All'),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.green,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+
               ],
             ),
           ),
@@ -197,13 +165,22 @@ class MonthlyPlanCard extends StatelessWidget {
                     : Theme.of(context).colorScheme.primary,
               ),
             ),
-            Text(
-              '${(weeklyProgress * 100).round()}%',
-              style: TextStyle(
-                fontSize: 10,
-                color: Colors.grey[600],
+            if (weeklyPlan.dailyTasks.isNotEmpty)
+              Text(
+                '${(weeklyProgress * 100).round()}%',
+                style: TextStyle(
+                  fontSize: 10,
+                  color: Colors.grey[600],
+                ),
+              )
+            else
+              Text(
+                'No tasks',
+                style: TextStyle(
+                  fontSize: 10,
+                  color: Colors.grey[500],
+                ),
               ),
-            ),
           ],
         ),
         onTap: () => _showWeeklyPlanDetails(context, weeklyPlan),
@@ -262,44 +239,95 @@ class MonthlyPlanCard extends StatelessWidget {
               ),
               const SizedBox(height: 12),
               Expanded(
-                child: ListView.builder(
-                  controller: scrollController,
-                  itemCount: weeklyPlan.dailyTasks.length,
-                  itemBuilder: (context, index) {
-                    final task = weeklyPlan.dailyTasks[index];
-                    return Card(
-                      margin: const EdgeInsets.only(bottom: 8),
-                      child: ListTile(
-                        leading: Checkbox(
-                          value: task.isCompleted,
-                          onChanged: (value) {
-                            if (value == true) {
-                              Provider.of<PlanProvider>(context, listen: false)
-                                  .completeDailyTask(
-                                planId,
-                                monthlyPlan.id,
-                                weeklyPlan.id,
-                                task.id,
-                              );
-                              Navigator.pop(context);
-                            }
-                          },
+                child: weeklyPlan.dailyTasks.isEmpty
+                    ? Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              Icons.task_alt,
+                              size: 64,
+                              color: Colors.grey[400],
+                            ),
+                            const SizedBox(height: 16),
+                            Text(
+                              'No tasks yet',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w500,
+                                color: Colors.grey[600],
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              'Add tasks to this week to get started',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.grey[500],
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                            const SizedBox(height: 24),
+                            ElevatedButton.icon(
+                              onPressed: () {
+                                Navigator.pop(context);
+                                // Navigate to daily view to add tasks
+                                _navigateToDailyView(context, weeklyPlan);
+                              },
+                              icon: const Icon(Icons.add),
+                              label: const Text('Add Tasks'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Theme.of(context).colorScheme.primary,
+                                foregroundColor: Colors.white,
+                              ),
+                            ),
+                          ],
                         ),
-                        title: Text(task.title),
-                        subtitle: Text(
-                          DateFormat('MMM dd, yyyy').format(task.date),
-                        ),
-                        trailing: Text(
-                          '${task.estimatedMinutes} min',
-                          style: TextStyle(
-                            color: Colors.grey[600],
-                            fontSize: 12,
-                          ),
-                        ),
+                      )
+                    : ListView.builder(
+                        controller: scrollController,
+                        itemCount: weeklyPlan.dailyTasks.length,
+                        itemBuilder: (context, index) {
+                          final task = weeklyPlan.dailyTasks[index];
+                          return Card(
+                            margin: const EdgeInsets.only(bottom: 8),
+                            child: ListTile(
+                              leading: Checkbox(
+                                value: task.isCompleted,
+                                onChanged: (value) {
+                                  if (value == true) {
+                                    Provider.of<PlanProvider>(context, listen: false)
+                                        .completeDailyTask(
+                                      planId,
+                                      monthlyPlan.id,
+                                      weeklyPlan.id,
+                                      task.id,
+                                    );
+                                    Navigator.pop(context);
+                                  }
+                                },
+                              ),
+                              title: Text(task.title),
+                              subtitle: Text(
+                                DateFormat('MMM dd, yyyy').format(task.date),
+                              ),
+                              trailing: Text(
+                                '${task.estimatedMinutes} min',
+                                style: TextStyle(
+                                  color: Colors.grey[600],
+                                  fontSize: 12,
+                                ),
+                              ),
+                              onTap: () {
+                                Navigator.pop(context);
+                                // Navigate to task detail screen
+                                // We need to get the plan context here
+                                _navigateToTaskDetail(context, task, weeklyPlan);
+                              },
+                            ),
+                          );
+                        },
                       ),
-                    );
-                  },
-                ),
               ),
             ],
           ),
@@ -308,34 +336,44 @@ class MonthlyPlanCard extends StatelessWidget {
     );
   }
 
-  void _completeAllWeeklyPlans(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Complete All Weekly Plans'),
-        content: const Text('Are you sure you want to mark all weekly plans in this month as completed?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              // This would need to be implemented in the provider
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Feature coming soon!'),
-                  backgroundColor: Colors.orange,
-                ),
-              );
-            },
-            child: const Text('Complete All'),
-          ),
-        ],
+  void _navigateToTaskDetail(BuildContext context, DailyTask task, WeeklyPlan weeklyPlan) {
+    // We need to get the plan from the provider to navigate
+    final planProvider = Provider.of<PlanProvider>(context, listen: false);
+    final plan = planProvider.plans.firstWhere((p) => p.id == planId);
+    final monthlyPlanFromPlan = plan.monthlyPlans.firstWhere((mp) => mp.id == monthlyPlan.id);
+    
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => TaskDetailScreen(
+          task: task,
+          weeklyPlan: weeklyPlan,
+          monthlyPlan: monthlyPlanFromPlan,
+          plan: plan,
+        ),
       ),
     );
   }
+
+  void _navigateToDailyView(BuildContext context, WeeklyPlan weeklyPlan) {
+    // We need to get the plan from the provider to navigate
+    final planProvider = Provider.of<PlanProvider>(context, listen: false);
+    final plan = planProvider.plans.firstWhere((p) => p.id == planId);
+    final monthlyPlanFromPlan = plan.monthlyPlans.firstWhere((mp) => mp.id == monthlyPlan.id);
+    
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => PlanDetailScreen(
+          plan: plan,
+          selectedWeekPlan: weeklyPlan,
+          selectedMonthPlan: monthlyPlanFromPlan,
+        ),
+      ),
+    );
+  }
+
+
 
   double _calculateProgress() {
     if (monthlyPlan.weeklyPlans.isEmpty) return 0.0;

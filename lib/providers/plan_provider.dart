@@ -1,52 +1,92 @@
 import 'package:flutter/foundation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:convert';
 import '../models/plan.dart';
+import '../models/hourly_schedule.dart';
+import '../models/global_streak.dart';
+import '../services/database_service.dart';
+import '../services/notification_service.dart';
 
 class PlanProvider with ChangeNotifier {
+  final DatabaseService _databaseService = DatabaseService();
+  final NotificationService _notificationService = NotificationService();
   List<Plan> _plans = [];
   Plan? _selectedPlan;
-  int _totalStreak = 0;
-  int _bestTotalStreak = 0;
+  GlobalStreak? _globalStreak;
+  bool _isInitialized = false;
 
   List<Plan> get plans => _plans;
   Plan? get selectedPlan => _selectedPlan;
-  int get totalStreak => _totalStreak;
-  int get bestTotalStreak => _bestTotalStreak;
+  GlobalStreak? get globalStreak => _globalStreak;
+  int get totalStreak => _globalStreak?.currentStreak ?? 0;
+  int get bestTotalStreak => _globalStreak?.bestStreak ?? 0;
+  bool get isInitialized => _isInitialized;
 
   PlanProvider() {
-    _loadPlans();
-    _loadStreaks();
+    _initializeProvider();
+  }
+
+  Future<void> _initializeProvider() async {
+    try {
+      if (kDebugMode) {
+        print('PlanProvider: Starting initialization...');
+      }
+      
+      // Initialize notification service
+      await _notificationService.initialize();
+      
+      await _loadPlans();
+      await _loadGlobalStreak();
+      await _setupNotifications();
+      
+      _isInitialized = true;
+      if (kDebugMode) {
+        print('PlanProvider: Initialization completed successfully');
+        print('PlanProvider: Loaded ${_plans.length} plans');
+      }
+      notifyListeners();
+    } catch (e) {
+      if (kDebugMode) {
+        print('Error initializing PlanProvider: $e');
+      }
+    }
   }
 
   Future<void> _loadPlans() async {
-    final prefs = await SharedPreferences.getInstance();
-    final plansJson = prefs.getStringList('plans') ?? [];
-    _plans = plansJson
-        .map((planJson) => Plan.fromJson(json.decode(planJson)))
-        .toList();
+    try {
+      if (kDebugMode) {
+        print('PlanProvider: Loading plans from database...');
+      }
+      _plans = await _databaseService.getAllPlans();
+      if (kDebugMode) {
+        print('PlanProvider: Successfully loaded ${_plans.length} plans');
+      }
+      notifyListeners();
+    } catch (e) {
+      if (kDebugMode) {
+        print('Error loading plans: $e');
+      }
+    }
+  }
+
+  Future<void> _loadGlobalStreak() async {
+    _globalStreak = await _databaseService.getGlobalStreak();
+    if (_globalStreak == null) {
+      await _databaseService.initializeGlobalStreak();
+      _globalStreak = await _databaseService.getGlobalStreak();
+    }
     notifyListeners();
   }
 
-  Future<void> _savePlans() async {
-    final prefs = await SharedPreferences.getInstance();
-    final plansJson = _plans
-        .map((plan) => json.encode(plan.toJson()))
-        .toList();
-    await prefs.setStringList('plans', plansJson);
-  }
-
-  Future<void> _loadStreaks() async {
-    final prefs = await SharedPreferences.getInstance();
-    _totalStreak = prefs.getInt('totalStreak') ?? 0;
-    _bestTotalStreak = prefs.getInt('bestTotalStreak') ?? 0;
-    notifyListeners();
-  }
-
-  Future<void> _saveStreaks() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt('totalStreak', _totalStreak);
-    await prefs.setInt('bestTotalStreak', _bestTotalStreak);
+  Future<void> _setupNotifications() async {
+    // Schedule daily reminder
+    await _notificationService.scheduleDailyReminder();
+    
+    // Schedule plan-specific reminders for each active plan
+    for (final plan in _plans.where((p) => !p.isCompleted)) {
+      await _notificationService.schedulePlanReminder(plan.title, plan.hashCode);
+    }
+    
+    // Schedule end of day warning
+    await _notificationService.showEndOfDayWarning();
   }
 
   void selectPlan(Plan plan) {
@@ -80,18 +120,7 @@ class PlanProvider with ChangeNotifier {
         final weekEndDate = weekStartDate.add(const Duration(days: 6));
         
         final dailyTasks = <DailyTask>[];
-        for (int day = 0; day < 7; day++) {
-          final taskDate = weekStartDate.add(Duration(days: day));
-          final shouldAddTask = taskDate.isBefore(monthEndDate.add(const Duration(days: 1)));
-          if (shouldAddTask) {
-            dailyTasks.add(DailyTask(
-              id: '${monthDate.millisecondsSinceEpoch}_${week}_$day',
-              title: 'Task ${day + 1}',
-              description: 'Complete this task to progress',
-              date: taskDate,
-            ));
-          }
-        }
+        // No default tasks - users will add their own tasks
         
         weeklyPlans.add(WeeklyPlan(
           id: '${monthDate.millisecondsSinceEpoch}_$week',
@@ -125,7 +154,7 @@ class PlanProvider with ChangeNotifier {
     );
 
     _plans.add(plan);
-    await _savePlans();
+    await _databaseService.insertPlan(plan);
     notifyListeners();
   }
 
@@ -133,7 +162,7 @@ class PlanProvider with ChangeNotifier {
     final index = _plans.indexWhere((p) => p.id == plan.id);
     if (index != -1) {
       _plans[index] = plan;
-      await _savePlans();
+      await _databaseService.updatePlan(plan);
       notifyListeners();
     }
   }
@@ -143,7 +172,7 @@ class PlanProvider with ChangeNotifier {
     if (_selectedPlan?.id == planId) {
       _selectedPlan = null;
     }
-    await _savePlans();
+    await _databaseService.deletePlan(planId);
     notifyListeners();
   }
 
@@ -210,7 +239,7 @@ class PlanProvider with ChangeNotifier {
     if (_selectedPlan?.id == planId) {
       _selectedPlan = finalPlan;
     }
-    await _savePlans();
+    await _databaseService.updatePlan(finalPlan);
     notifyListeners();
   }
 
@@ -219,7 +248,7 @@ class PlanProvider with ChangeNotifier {
     final yesterday = today.subtract(const Duration(days: 1));
     
     if (plan.lastCompletedDate.isAtSameMomentAs(yesterday)) {
-      // Continue streak
+      // Continue per-task streak
       final newStreak = plan.currentStreak + 1;
       final newBestStreak = newStreak > plan.bestStreak ? newStreak : plan.bestStreak;
       
@@ -238,14 +267,13 @@ class PlanProvider with ChangeNotifier {
         _selectedPlan = updatedPlan;
       }
       
-      _totalStreak = newStreak;
-      if (newStreak > _bestTotalStreak) {
-        _bestTotalStreak = newStreak;
-      }
+      await _databaseService.updatePlan(updatedPlan);
       
-      await _saveStreaks();
+      // Check if all active plans are completed for today
+      await _checkGlobalStreakUpdate();
+      
     } else if (plan.lastCompletedDate.isBefore(yesterday)) {
-      // Break streak
+      // Break per-task streak
       final updatedPlan = plan.copyWith(
         currentStreak: 1,
         lastCompletedDate: today,
@@ -260,8 +288,174 @@ class PlanProvider with ChangeNotifier {
         _selectedPlan = updatedPlan;
       }
       
-      _totalStreak = 1;
-      await _saveStreaks();
+      await _databaseService.updatePlan(updatedPlan);
+    }
+  }
+
+  Future<void> _checkGlobalStreakUpdate() async {
+    if (_globalStreak == null) return;
+    
+    final today = DateTime.now();
+    final activePlans = _plans.where((p) => !p.isCompleted).toList();
+    
+    // Filter plans that have tasks for today
+    final plansWithTasksToday = activePlans.where((plan) {
+      // Check if any weekly plan in any monthly plan has tasks for today
+      for (final monthlyPlan in plan.monthlyPlans) {
+        for (final weeklyPlan in monthlyPlan.weeklyPlans) {
+          final todayNormalized = DateTime(today.year, today.month, today.day);
+          final hasTasksForToday = weeklyPlan.dailyTasks.any((task) {
+            final taskDateNormalized = DateTime(task.date.year, task.date.month, task.date.day);
+            return taskDateNormalized.isAtSameMomentAs(todayNormalized);
+          });
+          if (hasTasksForToday) return true;
+        }
+      }
+      return false;
+    }).toList();
+    
+    // If no plans have tasks for today, don't update streak
+    if (plansWithTasksToday.isEmpty) return;
+    
+    // Check if all plans with tasks today have been completed today
+    final allPlansCompletedToday = plansWithTasksToday.every((plan) {
+      return plan.lastCompletedDate.year == today.year &&
+             plan.lastCompletedDate.month == today.month &&
+             plan.lastCompletedDate.day == today.day;
+    });
+    
+    if (allPlansCompletedToday) {
+      // All plans with tasks completed today - update global streak
+      await _updateGlobalStreak(true);
+    }
+  }
+
+  Future<void> _updateGlobalStreak(bool completedToday) async {
+    if (_globalStreak == null) return;
+    
+    final today = DateTime.now();
+    final yesterday = today.subtract(const Duration(days: 1));
+    
+    if (completedToday) {
+      // User completed all tasks today
+      if (_globalStreak!.lastCompletedDate.year == yesterday.year &&
+          _globalStreak!.lastCompletedDate.month == yesterday.month &&
+          _globalStreak!.lastCompletedDate.day == yesterday.day) {
+        // Continue global streak
+        final newStreak = _globalStreak!.currentStreak + 1;
+        final newBestStreak = newStreak > _globalStreak!.bestStreak ? newStreak : _globalStreak!.bestStreak;
+        
+        _globalStreak = _globalStreak!.copyWith(
+          currentStreak: newStreak,
+          bestStreak: newBestStreak,
+          lastCompletedDate: today,
+        );
+        
+        // Check for milestone notifications
+        if (newStreak == 7 || newStreak == 30 || newStreak == 100) {
+          await _notificationService.showStreakMilestoneNotification(newStreak);
+        }
+        
+      } else if (_globalStreak!.lastCompletedDate.isBefore(yesterday)) {
+        // Start new streak
+        _globalStreak = _globalStreak!.copyWith(
+          currentStreak: 1,
+          lastCompletedDate: today,
+        );
+      }
+    } else {
+      // User didn't complete all tasks today
+      // Skip day logic is now handled automatically in checkEndOfDay()
+      // This method only handles immediate streak updates when tasks are completed
+    }
+    
+    await _databaseService.updateGlobalStreak(_globalStreak!);
+    notifyListeners();
+  }
+
+  // Method to automatically use a skip day after 24 hours
+  Future<void> _autoUseSkipDay() async {
+    if (_globalStreak == null) return;
+    
+    final today = DateTime.now();
+    
+    if (_globalStreak!.canUseSkipDay) {
+      final newSkipCount = _globalStreak!.skipDaysUsedThisMonth + 1;
+      
+      _globalStreak = _globalStreak!.copyWith(
+        skipDaysUsedThisMonth: newSkipCount,
+        lastSkipDate: today,
+        currentMonth: today.month,
+        currentYear: today.year,
+      );
+      
+      await _databaseService.updateGlobalStreak(_globalStreak!);
+      
+      // Show skip day notification
+      await _notificationService.showSkipDayNotification(
+        newSkipCount,
+        _globalStreak!.remainingSkipDays,
+      );
+      
+      notifyListeners();
+    } else {
+      // No more skip days - reset streak
+      _globalStreak = _globalStreak!.copyWith(
+        currentStreak: 0,
+        lastCompletedDate: today,
+      );
+      
+      await _databaseService.updateGlobalStreak(_globalStreak!);
+      
+      // Show streak lost notification
+      await _notificationService.showStreakLostNotification();
+      
+      notifyListeners();
+    }
+  }
+
+  // Method to check end of day and handle streak logic
+  Future<void> checkEndOfDay() async {
+    if (_globalStreak == null) return;
+    
+    final today = DateTime.now();
+    final activePlans = _plans.where((p) => !p.isCompleted).toList();
+    
+    // Filter plans that have tasks for today
+    final plansWithTasksToday = activePlans.where((plan) {
+      // Check if any weekly plan in any monthly plan has tasks for today
+      for (final monthlyPlan in plan.monthlyPlans) {
+        for (final weeklyPlan in monthlyPlan.weeklyPlans) {
+          final todayNormalized = DateTime(today.year, today.month, today.day);
+          final hasTasksForToday = weeklyPlan.dailyTasks.any((task) {
+            final taskDateNormalized = DateTime(task.date.year, task.date.month, task.date.day);
+            return taskDateNormalized.isAtSameMomentAs(todayNormalized);
+          });
+          if (hasTasksForToday) return true;
+        }
+      }
+      return false;
+    }).toList();
+    
+    // If no plans have tasks for today, don't check streak
+    if (plansWithTasksToday.isEmpty) return;
+    
+    // Check if all plans with tasks today have been completed today
+    final allPlansCompletedToday = plansWithTasksToday.every((plan) {
+      return plan.lastCompletedDate.year == today.year &&
+             plan.lastCompletedDate.month == today.month &&
+             plan.lastCompletedDate.day == today.day;
+    });
+    
+    if (!allPlansCompletedToday) {
+      // Check if 24 hours have passed since last completion
+      final lastCompleted = _globalStreak!.lastCompletedDate;
+      final hoursSinceLastCompletion = today.difference(lastCompleted).inHours;
+      
+      if (hoursSinceLastCompletion >= 24) {
+        // 24 hours have passed, automatically use skip day or reset streak
+        await _autoUseSkipDay();
+      }
     }
   }
 
@@ -279,9 +473,317 @@ class PlanProvider with ChangeNotifier {
         _selectedPlan = updatedPlan;
       }
       
-      _totalStreak = 0;
-      _saveStreaks();
+      _databaseService.updatePlan(updatedPlan);
       notifyListeners();
     }
+  }
+
+  // Reset global streak
+  void resetGlobalStreak() {
+    if (_globalStreak == null) return;
+    
+    final today = DateTime.now();
+    _globalStreak = _globalStreak!.copyWith(
+      currentStreak: 0,
+      lastCompletedDate: today,
+      skipDaysUsedThisMonth: 0,
+      lastSkipDate: today,
+      currentMonth: today.month,
+      currentYear: today.year,
+    );
+    
+    _databaseService.updateGlobalStreak(_globalStreak!);
+    notifyListeners();
+  }
+
+  Future<void> addDailyTask(
+    String planId,
+    String monthlyPlanId,
+    String weeklyPlanId,
+    String taskTitle,
+    DateTime taskDate,
+    int estimatedMinutes,
+  ) async {
+    final planIndex = _plans.indexWhere((p) => p.id == planId);
+    if (planIndex == -1) return;
+
+    final plan = _plans[planIndex];
+    final monthlyPlanIndex = plan.monthlyPlans.indexWhere((mp) => mp.id == monthlyPlanId);
+    if (monthlyPlanIndex == -1) return;
+
+    final monthlyPlan = plan.monthlyPlans[monthlyPlanIndex];
+    final weeklyPlanIndex = monthlyPlan.weeklyPlans.indexWhere((wp) => wp.id == weeklyPlanId);
+    if (weeklyPlanIndex == -1) return;
+
+    final weeklyPlan = monthlyPlan.weeklyPlans[weeklyPlanIndex];
+    
+    // Create new daily task
+    final newTask = DailyTask(
+      id: '${taskDate.millisecondsSinceEpoch}_${DateTime.now().millisecondsSinceEpoch}',
+      title: taskTitle,
+      description: 'Task added on ${taskDate.toString().split(' ')[0]}',
+      date: DateTime(taskDate.year, taskDate.month, taskDate.day), // Ensure same date format
+      estimatedMinutes: estimatedMinutes,
+    );
+
+    // Update weekly plan with new task
+    final updatedWeeklyPlan = weeklyPlan.copyWith(
+      dailyTasks: [...weeklyPlan.dailyTasks, newTask],
+    );
+
+    // Update monthly plan
+    final updatedMonthlyPlan = monthlyPlan.copyWith(
+      weeklyPlans: [
+        ...monthlyPlan.weeklyPlans.take(weeklyPlanIndex),
+        updatedWeeklyPlan,
+        ...monthlyPlan.weeklyPlans.skip(weeklyPlanIndex + 1),
+      ],
+    );
+
+    // Update plan
+    final updatedPlan = plan.copyWith(
+      monthlyPlans: [
+        ...plan.monthlyPlans.take(monthlyPlanIndex),
+        updatedMonthlyPlan,
+        ...plan.monthlyPlans.skip(monthlyPlanIndex + 1),
+      ],
+    );
+
+    _plans[planIndex] = updatedPlan;
+    if (_selectedPlan?.id == planId) {
+      _selectedPlan = updatedPlan;
+    }
+    await _databaseService.updatePlan(updatedPlan);
+    notifyListeners();
+  }
+
+  Future<void> deleteDailyTask(
+    String planId,
+    String monthlyPlanId,
+    String weeklyPlanId,
+    String taskId,
+  ) async {
+    final planIndex = _plans.indexWhere((p) => p.id == planId);
+    if (planIndex == -1) return;
+
+    final plan = _plans[planIndex];
+    final monthlyPlanIndex = plan.monthlyPlans.indexWhere((mp) => mp.id == monthlyPlanId);
+    if (monthlyPlanIndex == -1) return;
+
+    final monthlyPlan = plan.monthlyPlans[monthlyPlanIndex];
+    final weeklyPlanIndex = monthlyPlan.weeklyPlans.indexWhere((wp) => wp.id == weeklyPlanId);
+    if (weeklyPlanIndex == -1) return;
+
+    final weeklyPlan = monthlyPlan.weeklyPlans[weeklyPlanIndex];
+    
+    // Remove task
+    final updatedDailyTasks = weeklyPlan.dailyTasks.where((task) => task.id != taskId).toList();
+
+    // Update weekly plan
+    final updatedWeeklyPlan = weeklyPlan.copyWith(
+      dailyTasks: updatedDailyTasks,
+    );
+
+    // Update monthly plan
+    final updatedMonthlyPlan = monthlyPlan.copyWith(
+      weeklyPlans: [
+        ...monthlyPlan.weeklyPlans.take(weeklyPlanIndex),
+        updatedWeeklyPlan,
+        ...monthlyPlan.weeklyPlans.skip(weeklyPlanIndex + 1),
+      ],
+    );
+
+    // Update plan
+    final updatedPlan = plan.copyWith(
+      monthlyPlans: [
+        ...plan.monthlyPlans.take(monthlyPlanIndex),
+        updatedMonthlyPlan,
+        ...plan.monthlyPlans.skip(monthlyPlanIndex + 1),
+      ],
+    );
+
+    _plans[planIndex] = updatedPlan;
+    if (_selectedPlan?.id == planId) {
+      _selectedPlan = updatedPlan;
+    }
+    
+    // Delete from database
+    await _databaseService.deleteDailyTask(taskId);
+    await _databaseService.updatePlan(updatedPlan);
+    notifyListeners();
+  }
+
+  // New methods for comprehensive task management
+  Future<void> updateTaskNotes(
+    String planId,
+    String monthlyPlanId,
+    String weeklyPlanId,
+    String taskId,
+    String notes,
+  ) async {
+    final planIndex = _plans.indexWhere((p) => p.id == planId);
+    if (planIndex == -1) return;
+
+    final plan = _plans[planIndex];
+    final monthlyPlanIndex = plan.monthlyPlans.indexWhere((mp) => mp.id == monthlyPlanId);
+    if (monthlyPlanIndex == -1) return;
+
+    final monthlyPlan = plan.monthlyPlans[monthlyPlanIndex];
+    final weeklyPlanIndex = monthlyPlan.weeklyPlans.indexWhere((wp) => wp.id == weeklyPlanId);
+    if (weeklyPlanIndex == -1) return;
+
+    final weeklyPlan = monthlyPlan.weeklyPlans[weeklyPlanIndex];
+    final taskIndex = weeklyPlan.dailyTasks.indexWhere((task) => task.id == taskId);
+    if (taskIndex == -1) return;
+
+    // Update task notes
+    final updatedTask = weeklyPlan.dailyTasks[taskIndex].copyWith(notes: notes);
+    final updatedDailyTasks = [
+      ...weeklyPlan.dailyTasks.take(taskIndex),
+      updatedTask,
+      ...weeklyPlan.dailyTasks.skip(taskIndex + 1),
+    ];
+
+    // Update weekly plan
+    final updatedWeeklyPlan = weeklyPlan.copyWith(
+      dailyTasks: updatedDailyTasks,
+    );
+
+    // Update monthly plan
+    final updatedMonthlyPlan = monthlyPlan.copyWith(
+      weeklyPlans: [
+        ...monthlyPlan.weeklyPlans.take(weeklyPlanIndex),
+        updatedWeeklyPlan,
+        ...monthlyPlan.weeklyPlans.skip(weeklyPlanIndex + 1),
+      ],
+    );
+
+    // Update plan
+    final updatedPlan = plan.copyWith(
+      monthlyPlans: [
+        ...plan.monthlyPlans.take(monthlyPlanIndex),
+        updatedMonthlyPlan,
+        ...plan.monthlyPlans.skip(monthlyPlanIndex + 1),
+      ],
+    );
+
+    _plans[planIndex] = updatedPlan;
+    if (_selectedPlan?.id == planId) {
+      _selectedPlan = updatedPlan;
+    }
+    
+    // Update in database
+    await _databaseService.updateDailyTask(updatedTask);
+    await _databaseService.updatePlan(updatedPlan);
+    notifyListeners();
+  }
+
+  Future<void> updateTaskActualTime(
+    String planId,
+    String monthlyPlanId,
+    String weeklyPlanId,
+    String taskId,
+    int actualMinutes,
+  ) async {
+    final planIndex = _plans.indexWhere((p) => p.id == planId);
+    if (planIndex == -1) return;
+
+    final plan = _plans[planIndex];
+    final monthlyPlanIndex = plan.monthlyPlans.indexWhere((mp) => mp.id == monthlyPlanId);
+    if (monthlyPlanIndex == -1) return;
+
+    final monthlyPlan = plan.monthlyPlans[monthlyPlanIndex];
+    final weeklyPlanIndex = monthlyPlan.weeklyPlans.indexWhere((wp) => wp.id == weeklyPlanId);
+    if (weeklyPlanIndex == -1) return;
+
+    final weeklyPlan = monthlyPlan.weeklyPlans[weeklyPlanIndex];
+    final taskIndex = weeklyPlan.dailyTasks.indexWhere((task) => task.id == taskId);
+    if (taskIndex == -1) return;
+
+    // Update task actual time
+    final updatedTask = weeklyPlan.dailyTasks[taskIndex].copyWith(actualMinutes: actualMinutes);
+    final updatedDailyTasks = [
+      ...weeklyPlan.dailyTasks.take(taskIndex),
+      updatedTask,
+      ...weeklyPlan.dailyTasks.skip(taskIndex + 1),
+    ];
+
+    // Update weekly plan
+    final updatedWeeklyPlan = weeklyPlan.copyWith(
+      dailyTasks: updatedDailyTasks,
+    );
+
+    // Update monthly plan
+    final updatedMonthlyPlan = monthlyPlan.copyWith(
+      weeklyPlans: [
+        ...monthlyPlan.weeklyPlans.take(weeklyPlanIndex),
+        updatedWeeklyPlan,
+        ...monthlyPlan.weeklyPlans.skip(weeklyPlanIndex + 1),
+      ],
+    );
+
+    // Update plan
+    final updatedPlan = plan.copyWith(
+      monthlyPlans: [
+        ...plan.monthlyPlans.take(monthlyPlanIndex),
+        updatedMonthlyPlan,
+        ...plan.monthlyPlans.skip(monthlyPlanIndex + 1),
+      ],
+    );
+
+    _plans[planIndex] = updatedPlan;
+    if (_selectedPlan?.id == planId) {
+      _selectedPlan = updatedPlan;
+    }
+    
+    // Update in database
+    await _databaseService.updateDailyTask(updatedTask);
+    await _databaseService.updatePlan(updatedPlan);
+    notifyListeners();
+  }
+
+  // Hourly schedule management
+  Future<void> saveHourlySchedule(
+    String planId,
+    String monthlyPlanId,
+    String weeklyPlanId,
+    String taskId,
+    List<HourlySchedule> schedules,
+  ) async {
+    // Clear existing schedules for this task
+    await _databaseService.deleteHourlySchedule(taskId);
+    
+    // Insert new schedules
+    for (final schedule in schedules) {
+      if (schedule.taskName.isNotEmpty) {
+        await _databaseService.insertHourlySchedule(
+          taskId,
+          '${schedule.startTime.hour.toString().padLeft(2, '0')}:${schedule.startTime.minute.toString().padLeft(2, '0')}',
+          '${schedule.endTime.hour.toString().padLeft(2, '0')}:${schedule.endTime.minute.toString().padLeft(2, '0')}',
+          schedule.taskName,
+          notes: schedule.notes,
+        );
+      }
+    }
+    
+    notifyListeners();
+  }
+
+  Future<List<HourlySchedule>> getHourlySchedules(String taskId) async {
+    try {
+      final schedulesData = await _databaseService.getHourlySchedulesForTask(taskId);
+      return schedulesData.map((data) => HourlySchedule.fromDatabase(data)).toList();
+    } catch (e) {
+      if (kDebugMode) {
+        print('Error loading hourly schedules: $e');
+      }
+      return [];
+    }
+  }
+
+  // Data migration from SharedPreferences (if needed)
+  Future<void> migrateFromSharedPreferences() async {
+    // This method can be used to migrate existing data from SharedPreferences
+    // Implementation depends on existing data structure
   }
 }

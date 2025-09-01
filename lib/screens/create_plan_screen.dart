@@ -251,7 +251,7 @@ class _CreatePlanScreenState extends State<CreatePlanScreen> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
-                        'Your plan will be automatically divided into monthly, weekly, and daily tasks. Complete daily tasks to maintain your streak!',
+                        'Your plan will be divided into monthly and weekly sections. Add your own daily tasks to maintain your streak!',
                         style: TextStyle(
                           color: Colors.blue[700],
                           fontSize: 14,
