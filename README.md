@@ -2,6 +2,11 @@
 
 A comprehensive Flutter mobile application for creating and managing long-term learning and productivity plans with a TikTok-inspired streak system.
 
+<img width="1290" height="2796" alt="simulator_screenshot_996C5187-849E-4991-ADEA-5DFEBDB48D1E" src="https://github.com/user-attachments/assets/9fd976ff-1a68-47cc-bac6-013e8c176ed3" />
+
+
+
+
 ## 🚀 Features
 
 ### Core Functionality
